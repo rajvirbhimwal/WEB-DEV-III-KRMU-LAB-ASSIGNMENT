@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secure Connect - Chat Demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  input, button { padding: .5rem; margin: .25rem 0; }
+  input { width: 100%; box-sizing: border-box; }
+  #messages { border: 1px solid #ccc; height: 320px; overflow-y: auto; padding: .5rem; margin: .5rem 0; }
+  .sys { color: #888; font-style: italic; }
+  .row { display: flex; gap: .5rem; }
+  .hidden { display: none; }
+  #status { color: #b00; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<h2>Secure Connect</h2>
+<p id="status"></p>
+
+<section id="authBox">
+  <input id="username" placeholder="Username (signup only)">
+  <input id="email" type="email" placeholder="Email">
+  <input id="password" type="password" placeholder="Password">
+  <div class="row">
+    <button id="signupBtn">Sign up</button>
+    <button id="loginBtn">Log in</button>
+  </div>
+</section>
+
+<section id="chatBox" class="hidden">
+  <div class="row">
+    <input id="roomInput" placeholder="Room name" value="general">
+    <button id="joinBtn">Join</button>
+    <button id="leaveBtn">Leave</button>
+  </div>
+  <div id="messages"></div>
+  <small id="typing"></small>
+  <div class="row">
+    <input id="msgInput" placeholder="Type a message...">
+    <button id="sendBtn">Send</button>
+  </div>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let socket;
+  let currentRoom = 'general';
+  let typingTimer;
+
+  const setStatus = (msg) => { $('status').textContent = msg || ''; };
+
+  const addLine = (text, cls) => {
+    const div = document.createElement('div');
+    if (cls) div.className = cls;
+    div.textContent = text;
+    $('messages').appendChild(div);
+    $('messages').scrollTop = $('messages').scrollHeight;
+  };
+
+  async function post(url, body) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Request failed');
+    return data;
+  }
+
+  $('signupBtn').onclick = async () => {
+    try {
+      await post('/api/auth/signup', {
+        username: $('username').value, email: $('email').value, password: $('password').value,
+      });
+      setStatus('Signed up! Now log in.');
+    } catch (e) { setStatus(e.message); }
+  };
+
+  $('loginBtn').onclick = async () => {
+    try {
+      await post('/api/auth/login', { email: $('email').value, password: $('password').value });
+      setStatus('');
+      $('authBox').classList.add('hidden');
+      $('chatBox').classList.remove('hidden');
+      connectSocket();
+    } catch (e) { setStatus(e.message); }
+  };
+
+  function connectSocket() {
+    // The httpOnly "token" cookie is sent automatically with the handshake
+    socket = io();
+    socket.on('connect_error', (err) => setStatus('Socket error: ' + err.message));
+    socket.on('message', (m) => addLine(`[${m.room}] ${m.username}: ${m.text}`));
+    socket.on('systemMessage', (m) => addLine(`[${m.room}] ${m.text}`, 'sys'));
+    socket.on('history', ({ room, messages }) =>
+      messages.forEach((m) => addLine(`[${room}] ${m.username}: ${m.text}`)));
+    socket.on('joinedRoom', (room) => { currentRoom = room; addLine(`You joined ${room}`, 'sys'); });
+    socket.on('leftRoom', (room) => addLine(`You left ${room}`, 'sys'));
+    socket.on('chatError', (msg) => setStatus(msg));
+    socket.on('typing', ({ room, username }) => {
+      $('typing').textContent = `${username} is typing in ${room}...`;
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => { $('typing').textContent = ''; }, 1500);
+    });
+  }
+
+  const send = () => {
+    const text = $('msgInput').value.trim();
+    if (!text) return;
+    socket.emit('chatMessage', { room: currentRoom, text });
+    $('msgInput').value = '';
+  };
+
+  $('sendBtn').onclick = send;
+  $('msgInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  $('msgInput').addEventListener('input', () => socket && socket.emit('typing', currentRoom));
+  $('joinBtn').onclick = () => socket.emit('joinRoom', $('roomInput').value.trim());
+  $('leaveBtn').onclick = () => socket.emit('leaveRoom', $('roomInput').value.trim());
+</script>
+</body>
+</html>
