@@ -1,0 +1,10 @@
+const router = require("express").Router();
+const c = require("../controllers/cartController");
+const { protect, authorize } = require("../middleware/auth");
+router.use(protect, authorize("customer"));
+router.get("/", c.get);
+router.post("/items", c.add);
+router.patch("/items/:productId", c.update);
+router.delete("/items/:productId", c.remove);
+router.delete("/", c.clear);
+module.exports = router;
